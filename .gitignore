@@ -1,0 +1,44 @@
+# Python-related files
+*.pyc
+*.pyo
+__pycache__
+
+# Virtual environment directories
+.venv/
+env/
+venv/
+
+# Flask-specific files
+instance/
+*.log
+
+# Configuration files
+# config.py
+
+# Environment variable files
+.env
+*.env
+
+# PyCharm, VSCode, and IDE configurations
+.idea/
+.vscode/
+
+# Database files (SQLite or others)
+*.db
+*.sqlite
+
+# Node modules (if using frontend with Flask)
+node_modules/
+
+# Coverage reports (if using testing tools)
+.coverage
+nosetests.xml
+coverage.xml
+
+# Build directories (for packages and deployment)
+build/
+dist/
+*.egg-info/
+
+# macOS-specific files
+.DS_Store
