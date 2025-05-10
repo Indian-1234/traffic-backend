@@ -1,5 +1,5 @@
 import uvicorn
-from api3 import app
+from api import app
 
 def main():
     """Run the FastAPI server"""
