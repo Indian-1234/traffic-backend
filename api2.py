@@ -11,9 +11,6 @@ from models import TrafficRequest, TrafficPrediction, OptimizationResult, LiveTr
 from quantum_config import QuantumTrafficPredictor, generate_training_data
 from traffic_graph import TrafficGraph
 
-# Import PostgreSQL auth module
-from postgresql_auth import setup_auth_routes, get_db, User, Base, engine
-
 # Configuration Settings
 TOMTOM_API_KEY = "IV7dQDp5vey54vgGvRlIDmn7qazKzAaN"  # Replace with your actual API key
 TOMTOM_TRAFFIC_URL = "https://api.tomtom.com/traffic/services/4/flowSegmentData/absolute/10/json"
@@ -61,9 +58,6 @@ def get_tomtom_traffic(lat: float, lon: float) -> Optional[dict]:
 @app.on_event("startup")
 async def startup_event():
     """Initialize the application on startup"""
-    # Ensure PostgreSQL tables are created
-    Base.metadata.create_all(bind=engine)
-    
     # Check if model file exists
     if os.path.exists(MODEL_SAVE_PATH):
         model.load_model(MODEL_SAVE_PATH)
@@ -460,10 +454,3 @@ async def get_traffic_summary():
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error generating traffic summary: {str(e)}")
-
-# Set up authentication routes
-setup_auth_routes(app)
-
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
