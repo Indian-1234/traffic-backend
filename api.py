@@ -19,7 +19,7 @@ TOMTOM_API_KEY = "IV7dQDp5vey54vgGvRlIDmn7qazKzAaN"  # Replace with your actual 
 TOMTOM_TRAFFIC_URL = "https://api.tomtom.com/traffic/services/4/flowSegmentData/absolute/10/json"
 MODEL_SAVE_PATH = "quantum_traffic_model.json"
 
-# Initialize the FastAPI app
+# Initialize the FastAPI app    
 app = FastAPI(
     title="Quantum Traffic Optimization API",
     description="API for traffic prediction and optimization using quantum computing",
@@ -152,9 +152,11 @@ async def predict_traffic(data: TrafficRequest):
 
 @app.post("/optimize-route", response_model=OptimizationResult)
 async def optimize_route(
-    start_node: int = Query(..., description="Starting intersection ID"),
+     start_node: int = Query(..., description="Starting intersection ID"),
     end_node: int = Query(..., description="Destination intersection ID"),
-    departure_time: int = Query(..., description="Departure time (hour of day, 0-23)")
+    departure_time: int = Query(..., description="Departure time (hour of day, 0-23)"),
+    latitude: float = Query(..., description="Latitude of user/device"),
+    longitude: float = Query(..., description="Longitude of user/device")
 ):
     """Optimize route between two points using quantum optimization"""
     try:
@@ -172,10 +174,10 @@ async def optimize_route(
             
             # Create a request for this segment
             request_data = TrafficRequest(
-                vehicle_count=100,  # Placeholder
-                weather_condition=0.2,  # Placeholder
-                latitude=u_lat,
-                longitude=u_lon,
+                vehicle_count=100,
+                weather_condition=0.2,
+                latitude=latitude,
+                longitude=longitude,
                 time_of_day=departure_time,
                 day_of_week=datetime.now().weekday()
             )
@@ -466,4 +468,4 @@ setup_auth_routes(app)
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=8000) 
