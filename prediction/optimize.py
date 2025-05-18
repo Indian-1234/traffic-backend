@@ -13,8 +13,10 @@ from braket.devices import LocalSimulator
 from braket.aws import AwsDevice  # Added for AWS Braket
 
 # AWS Braket configuration
+# AWS Braket configuration
 SV1_ARN = "arn:aws:braket:::device/quantum-simulator/amazon/sv1"
 S3_FOLDER = ("amazon-braket-quantiumhitter", "quantum-results")
+AWS_REGION = "us-east-1"  # Add this line
 
 # Import functions from predict.py
 from predict import (
@@ -83,7 +85,7 @@ def run_circuit_on_sv1(circuit):
     print("Running circuit on AWS SV1 quantum simulator...")
     
     # Initialize the SV1 simulator device
-    device = AwsDevice(SV1_ARN)
+    device = AwsDevice(SV1_ARN, aws_session=boto3.Session(region_name=AWS_REGION))
     
     # Run the circuit on SV1
     task = device.run(
@@ -449,7 +451,7 @@ def save_results_to_s3(optimal_path, route_stats, nodes, bucket_name="amazon-bra
     """
     try:
         # Initialize S3 client
-        s3_client = boto3.client('s3')
+        s3_client = boto3.client('s3', region_name=AWS_REGION)
         
         # Generate timestamp for unique filenames
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
