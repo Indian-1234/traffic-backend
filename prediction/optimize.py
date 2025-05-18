@@ -1,36 +1,176 @@
-# Add boto3 to imports at the top of your file
 import numpy as np
 import time
 import requests
 import heapq
 import folium
-import boto3  # Add this import
-import json   # Add this import
-import io     # Add this import
+import boto3
+import json
+import io
+import os
 from datetime import datetime
 from braket.circuits import Circuit
 from braket.devices import LocalSimulator
-from braket.aws import AwsDevice  # Added for AWS Braket
-import os
-os.environ['AWS_DEFAULT_REGION'] = 'us-east-1'
-# AWS Braket configuration
-# AWS Braket configuration
-SV1_ARN = "arn:aws:braket:::device/quantum-simulator/amazon/sv1"
-S3_FOLDER = ("amazon-braket-quantiumhitter", "quantum-results")
-AWS_REGION = "us-east-1"  # Add this line
-
-# Import functions from predict.py
-from predict import (
-    get_traffic_data,
-    normalize_traffic_data,
-    create_traffic_prediction_circuit,
-    run_circuit_locally,
-    interpret_traffic_prediction
-)
+from braket.aws import AwsDevice, AwsSession
 
 # TomTom API configuration
 TOMTOM_API_KEY = "IV7dQDp5vey54vgGvRlIDmn7qazKzAaN"
 TOMTOM_ROUTING_URL = "https://api.tomtom.com/routing/1/calculateRoute"
+
+# AWS Braket configuration with more fallback options
+SV1_ARN = "arn:aws:braket:::device/quantum-simulator/amazon/sv1"
+S3_FOLDER = ("amazon-braket-quantiumhitter", "quantum-results")
+AWS_REGION = "us-east-1"
+
+# Import functions for prediction - simulate this import with function definitions
+# Functions from predict.py integrated directly to avoid import issues
+
+def get_traffic_data(latitude, longitude, zoom=10):
+    """
+    Get traffic data from TomTom API for a specific location.
+    Returns speed, free flow speed, and confidence values.
+    """
+    TOMTOM_TRAFFIC_URL = "https://api.tomtom.com/traffic/services/4/flowSegmentData/absolute/10/json"
+    
+    params = {
+        "point": f"{latitude},{longitude}",
+        "unit": "KMPH",
+        "openLr": "false",
+        "zoom": zoom,
+        "key": TOMTOM_API_KEY
+    }
+    
+    try:
+        response = requests.get(TOMTOM_TRAFFIC_URL, params=params)
+        response.raise_for_status()
+        data = response.json()
+        
+        # Extract relevant traffic data
+        flow_data = data.get('flowSegmentData', {})
+        current_speed = flow_data.get('currentSpeed', 0)
+        free_flow_speed = flow_data.get('freeFlowSpeed', 0)
+        confidence = flow_data.get('confidence', 0)
+        
+        print(f"Retrieved traffic data: Current speed = {current_speed}, Free flow = {free_flow_speed}")
+        return current_speed, free_flow_speed, confidence
+    
+    except Exception as e:
+        print(f"Error fetching traffic data: {str(e)}")
+        # Return default values in case of error
+        return 30, 50, 0.5
+
+
+def normalize_traffic_data(current_speed, free_flow_speed, confidence):
+    """
+    Normalize traffic data to values suitable for quantum circuit parameters.
+    Returns values between 0 and 2π for angles.
+    """
+    # Calculate congestion ratio (0 to 1, where 1 means no congestion)
+    if free_flow_speed == 0:  # Avoid division by zero
+        congestion_ratio = 0.5
+    else:
+        congestion_ratio = min(current_speed / free_flow_speed, 1.0)
+    
+    # Convert to angles for quantum gates
+    congestion_angle = congestion_ratio * np.pi
+    confidence_angle = confidence * np.pi / 2
+    
+    return congestion_angle, confidence_angle
+
+
+def create_traffic_prediction_circuit(congestion_angle, confidence_angle, n_qubits=3):
+    """
+    Create a quantum circuit for traffic prediction based on traffic parameters.
+    Uses rotation gates parameterized by traffic data.
+    """
+    circuit = Circuit()
+    
+    # Initialize circuit with superposition
+    for i in range(n_qubits):
+        circuit.h(i)
+    
+    # Apply rotations based on traffic data
+    # First qubit: congestion level
+    circuit.rx(0, congestion_angle)
+    
+    # Second qubit: confidence level
+    circuit.ry(1, confidence_angle)
+    
+    # Create entanglement between qubits
+    for i in range(n_qubits-1):
+        circuit.cnot(i, i+1)
+    
+    # Apply final phase based on combination of parameters
+    combined_angle = (congestion_angle + confidence_angle) / 2
+    circuit.rz(n_qubits-1, combined_angle)
+    
+    # Apply QFT-inspired operations for the prediction
+    for i in range(n_qubits):
+        for j in range(i+1, n_qubits):
+            angle = 2 * np.pi / (2 ** (j - i + 1))
+            circuit.cphaseshift(control=i, target=j, angle=angle * congestion_angle)
+    
+    # Measure all qubits
+    for i in range(n_qubits):
+        circuit.measure(i)
+    
+    return circuit
+
+
+def run_circuit_locally(circuit, shots=1000):
+    """
+    Run the quantum circuit on a local simulator.
+    """
+    device = LocalSimulator()
+    
+    print(f"Running traffic prediction circuit with {len(circuit.qubits)} qubits locally...")
+    start_time = time.time()
+    result = device.run(circuit, shots=shots).result()
+    end_time = time.time()
+    
+    print(f"Circuit execution time: {end_time - start_time:.2f} seconds")
+    
+    # Get measurement counts
+    counts = result.measurement_counts
+    
+    return counts
+
+
+def interpret_traffic_prediction(counts, n_qubits=3):
+    """
+    Interpret the quantum measurement results as traffic predictions.
+    Returns predicted congestion level and confidence.
+    """
+    if not counts:
+        return {"congestion": 0.5, "confidence": 0.5, "prediction": "Moderate traffic expected"}
+    
+    # Find the most probable state
+    most_probable = max(counts, key=counts.get)
+    probability = counts[most_probable] / sum(counts.values())
+    
+    # Convert binary string to integer
+    state_int = int(most_probable, 2)
+    
+    # Calculate normalized congestion value (0 to 1)
+    max_state = 2**n_qubits - 1
+    congestion = state_int / max_state
+    
+    # Calculate prediction confidence based on probability distribution
+    # Higher probability of a single outcome indicates higher confidence
+    confidence = probability
+    
+    # Generate prediction message
+    if congestion < 0.3:
+        prediction = "Light traffic expected"
+    elif congestion < 0.7:
+        prediction = "Moderate traffic expected"
+    else:
+        prediction = "Heavy traffic expected"
+    
+    return {
+        "congestion": congestion,
+        "confidence": confidence,
+        "prediction": prediction
+    }
 
 
 class Node:
@@ -81,58 +221,104 @@ class Edge:
 
 def run_circuit_on_sv1(circuit):
     """
-    Run a quantum circuit on AWS SV1 simulator
+    Run a quantum circuit on AWS SV1 simulator with better error handling
+    and credential fallback mechanism
     """
-    print("Running circuit on AWS SV1 quantum simulator...")
+    print("Attempting to run circuit on AWS SV1 quantum simulator...")
     
     try:
-        # Method 1: Try with explicit region in environment
-        import os
-        os.environ['AWS_DEFAULT_REGION'] = AWS_REGION
+        # Try different methods to create a valid AWS session
+        aws_session = None
         
-        # Simple device initialization
-        device = AwsDevice(SV1_ARN)
-        
-    except Exception as e:
-        print(f"Method 1 failed: {e}")
+        # Method 1: Try default credentials from environment or config
         try:
-            # Method 2: Try with AwsSession
-            from braket.aws import AwsSession
-            aws_session = AwsSession()
+            print("Trying default AWS credentials...")
+            boto_session = boto3.Session(region_name=AWS_REGION)
+            aws_session = AwsSession(boto_session=boto_session)
+            # Test the credentials with a simple S3 operation
+            s3 = boto_session.client('s3')
+            s3.list_buckets()
+            print("AWS credentials valid")
+        except Exception as e:
+            print(f"Default AWS credentials failed: {e}")
+            aws_session = None
+        
+        # Method 2: Try with profile if available
+        if aws_session is None:
+            try:
+                print("Trying AWS profile credentials...")
+                # List available profiles to help troubleshoot
+                profiles = boto3.Session().available_profiles
+                print(f"Available AWS profiles: {profiles}")
+                
+                if profiles:
+                    # Try the first available profile
+                    boto_session = boto3.Session(profile_name=profiles[0], region_name=AWS_REGION)
+                    aws_session = AwsSession(boto_session=boto_session)
+                    # Test the credentials
+                    s3 = boto_session.client('s3')
+                    s3.list_buckets()
+                    print(f"Using AWS profile: {profiles[0]}")
+            except Exception as e:
+                print(f"AWS profile credentials failed: {e}")
+                aws_session = None
+        
+        # Method 3: Try with shared credentials file
+        if aws_session is None:
+            try:
+                print("Looking for credentials in shared credentials file...")
+                # Check if credentials file exists
+                home = os.path.expanduser("~")
+                cred_file = os.path.join(home, ".aws", "credentials")
+                if os.path.exists(cred_file):
+                    print(f"Credentials file found at {cred_file}")
+                    # Try to load credentials from file
+                    boto_session = boto3.Session(region_name=AWS_REGION)
+                    aws_session = AwsSession(boto_session=boto_session)
+                    # Test the credentials
+                    s3 = boto_session.client('s3')
+                    s3.list_buckets()
+                else:
+                    print("No credentials file found")
+            except Exception as e:
+                print(f"Shared credentials file failed: {e}")
+                aws_session = None
+        
+        # If we have valid AWS credentials, use them
+        if aws_session is not None:
             device = AwsDevice(SV1_ARN, aws_session=aws_session)
             
-        except Exception as e2:
-            print(f"Method 2 failed: {e2}")
-            # Method 3: Force region in boto session
-            from braket.aws import AwsSession
-            boto_session = boto3.Session()
-            boto_session.region_name = AWS_REGION  # Force set region
-            aws_session = AwsSession(boto_session=boto_session)
-            device = AwsDevice(SV1_ARN, aws_session=aws_session)
-    
-    # Run the circuit
-    task = device.run(
-        circuit,
-        s3_destination_folder=S3_FOLDER,
-        shots=1000
-    )
-    
-    print(f"Task ARN: {task.id}")
-    print("Waiting for quantum task to complete...")
-    
-    result = task.result()
-    counts = result.measurement_counts
-    
-    print(f"Circuit execution completed. Result: {counts}")
-    return counts
+            # Run the circuit
+            task = device.run(
+                circuit,
+                s3_destination_folder=S3_FOLDER,
+                shots=1000
+            )
+            
+            print(f"Task ARN: {task.id}")
+            print("Waiting for quantum task to complete...")
+            
+            result = task.result()
+            counts = result.measurement_counts
+            
+            print(f"Circuit execution completed. Result: {counts}")
+            return counts
+        else:
+            raise Exception("No valid AWS credentials found after all attempts")
+            
+    except Exception as e:
+        print(f"Failed to run on AWS SV1: {str(e)}")
+        print("Falling back to local simulation...")
+        return run_circuit_locally(circuit)
 
-def predict_traffic_for_node(node, use_aws=True):
+
+def predict_traffic_for_node(node, use_aws=False):
     """
     Use the quantum traffic prediction model to predict traffic at a node
     
     Args:
         node: The node to predict traffic for
-        use_aws: If True, use AWS SV1 simulator; otherwise use local simulator
+        use_aws: If True, try AWS SV1 simulator; otherwise use local simulator
     """
     print(f"Predicting traffic for {node.name}...")
     
@@ -153,7 +339,12 @@ def predict_traffic_for_node(node, use_aws=True):
     
     # Run circuit on AWS SV1 or locally
     if use_aws:
-        counts = run_circuit_on_sv1(circuit)
+        try:
+            counts = run_circuit_on_sv1(circuit)
+        except Exception as e:
+            print(f"AWS circuit execution failed: {e}")
+            print("Falling back to local simulation...")
+            counts = run_circuit_locally(circuit)
     else:
         counts = run_circuit_locally(circuit)
     
@@ -231,7 +422,7 @@ def create_network(nodes, max_distance=100):
     return graph, edges
 
 
-def predict_traffic_for_network(graph, edges, use_aws=True):
+def predict_traffic_for_network(graph, edges, use_aws=False):
     """
     Predict traffic for all nodes in the network and update edge congestion factors
     
@@ -429,6 +620,7 @@ def visualize_route(nodes, optimal_path, map_file="optimal_route.html"):
     # Return the map object
     return route_map
 
+
 def get_specific_tamil_nadu_nodes():
     """
     Create a focused set of Tamil Nadu nodes with coordinates
@@ -456,22 +648,18 @@ def get_specific_tamil_nadu_nodes():
         Node("Sivaganga", 9.8474, 78.4836)
     ]
 
-def save_results_to_s3(optimal_path, route_stats, nodes, bucket_name="amazon-braket-quantiumhitter", 
-                      prefix="quantum-route-results"):
+
+def save_results_to_local(optimal_path, route_stats, nodes, filename="route_results.json"):
     """
-    Save route optimization results to Amazon S3
+    Save route optimization results locally when S3 is not available
     
     Args:
         optimal_path: The calculated optimal path
         route_stats: Statistics about the route (distance, time)
         nodes: List of network nodes
-        bucket_name: S3 bucket name
-        prefix: Prefix/folder for saving files in S3
+        filename: Name of the file to save results to
     """
     try:
-        # Initialize S3 client
-        s3_client = boto3.client('s3', region_name=AWS_REGION)
-        
         # Generate timestamp for unique filenames
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         
@@ -507,128 +695,15 @@ def save_results_to_s3(optimal_path, route_stats, nodes, bucket_name="amazon-bra
                 results["path_segments"].append(segment)
         
         # Save JSON results
-        json_key = f"{prefix}/{timestamp}_route_results.json"
-        s3_client.put_object(
-            Body=json.dumps(results, indent=2),
-            Bucket=bucket_name,
-            Key=json_key,
-            ContentType='application/json'
-        )
+        with open(f"{timestamp}_{filename}", 'w') as f:
+            json.dump(results, f, indent=2)
         
-        # Create and save HTML map if route visualization exists
-        if optimal_path:
-            # This assumes the visualize_route function has been modified to return the map object
-            route_map = create_route_map(nodes, optimal_path)
-            
-            # Save map to a bytes buffer
-            map_data = io.BytesIO()
-            route_map.save(map_data, close_file=False)
-            map_data.seek(0)
-            
-            # Upload HTML map to S3
-            html_key = f"{prefix}/{timestamp}_route_map.html"
-            s3_client.put_object(
-                Body=map_data.getvalue(),
-                Bucket=bucket_name,
-                Key=html_key,
-                ContentType='text/html'
-            )
-            
-            print(f"Results saved to S3 bucket '{bucket_name}':")
-            print(f"- JSON: s3://{bucket_name}/{json_key}")
-            print(f"- Map HTML: s3://{bucket_name}/{html_key}")
-            
-            # Generate a presigned URL for the HTML map (valid for 1 hour)
-            url = s3_client.generate_presigned_url(
-                'get_object',
-                Params={
-                    'Bucket': bucket_name,
-                    'Key': html_key
-                },
-                ExpiresIn=3600
-            )
-            print(f"Map URL (valid for 1 hour): {url}")
-            
-            return {
-                "json_path": f"s3://{bucket_name}/{json_key}",
-                "html_path": f"s3://{bucket_name}/{html_key}",
-                "presigned_url": url
-            }
-            
+        print(f"Results saved locally as {timestamp}_{filename}")
+        return f"{timestamp}_{filename}"
+        
     except Exception as e:
-        print(f"Error saving results to S3: {str(e)}")
+        print(f"Error saving results locally: {str(e)}")
         return None
-
-
-def create_route_map(nodes, optimal_path):
-    """
-    Create a map visualization of the optimal route
-    Returns the map object instead of saving it to a file
-    """
-    # Find center point for the map
-    lats = [node.lat for node in nodes]
-    lons = [node.lon for node in nodes]
-    center_lat = sum(lats) / len(lats)
-    center_lon = sum(lons) / len(lons)
-    
-    # Create map
-    route_map = folium.Map(location=[center_lat, center_lon], zoom_start=10)
-    
-    # Add all nodes to the map
-    for node in nodes:
-        # Determine color based on congestion
-        if node.traffic_prediction:
-            congestion = node.traffic_prediction['congestion']
-            if congestion < 0.3:
-                color = 'green'
-            elif congestion < 0.7:
-                color = 'orange'
-            else:
-                color = 'red'
-        else:
-            color = 'blue'
-        
-        # Handle None values properly
-        if node.traffic_prediction:
-            congestion_text = f"{node.traffic_prediction['congestion']:.2f}"
-        else:
-            congestion_text = "Unknown"
-            
-        folium.CircleMarker(
-            location=[node.lat, node.lon],
-            radius=6,
-            popup=f"{node.name}<br>Congestion: {congestion_text}",
-            color=color,
-            fill=True,
-            fill_opacity=0.7
-        ).add_to(route_map)
-    
-    # Add route path
-    for start, end, edge in optimal_path:
-        # Get start and end node objects from their names
-        start_node = next((node for node in nodes if node.name == start), None)
-        end_node = next((node for node in nodes if node.name == end), None)
-        
-        if start_node and end_node:
-            # Determine color based on congestion
-            congestion = edge.congestion_factor
-            if congestion < 0.3:
-                color = 'green'
-            elif congestion < 0.7:
-                color = 'orange'
-            else:
-                color = 'red'
-            
-            # Add line segment with popup showing details
-            folium.PolyLine(
-                [[start_node.lat, start_node.lon], [end_node.lat, end_node.lon]],
-                color=color,
-                weight=4,
-                opacity=0.8,
-                popup=f"Distance: {edge.distance:.2f}km<br>Congestion: {edge.congestion_factor:.2f}"
-            ).add_to(route_map)
-    
-    return route_map
 
 def main():
     """
@@ -739,13 +814,13 @@ def main():
     
     # Save results to S3 bucket
     print("\nSaving results to S3...")
-    s3_results = save_results_to_s3(optimal_path, route_stats, nodes)
+    # s3_results = save_results_to_s3(optimal_path, route_stats, nodes)
     
-    if s3_results:
-        print("\nResults available at:")
-        print(f"JSON: {s3_results['json_path']}")
-        print(f"Map: {s3_results['html_path']}")
-        print(f"View map: {s3_results['presigned_url']}")
+    # if s3_results:
+    #     print("\nResults available at:")
+    #     print(f"JSON: {s3_results['json_path']}")
+    #     print(f"Map: {s3_results['html_path']}")
+    #     print(f"View map: {s3_results['presigned_url']}")
     
     print("\nRoute optimization complete!")
     print("\nRoute optimization complete!")
