@@ -649,61 +649,62 @@ def get_specific_tamil_nadu_nodes():
     ]
 
 
-def save_results_to_local(optimal_path, route_stats, nodes, filename="route_results.json"):
-    """
-    Save route optimization results locally when S3 is not available
+# def save_results_to_local(optimal_path, route_stats, nodes, filename="route_results.json"):
+#     """
+#     Save route optimization results locally when S3 is not available
     
-    Args:
-        optimal_path: The calculated optimal path
-        route_stats: Statistics about the route (distance, time)
-        nodes: List of network nodes
-        filename: Name of the file to save results to
-    """
-    try:
-        # Generate timestamp for unique filenames
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+#     Args:
+#         optimal_path: The calculated optimal path
+#         route_stats: Statistics about the route (distance, time)
+#         nodes: List of network nodes
+#         filename: Name of the file to save results to
+#     """
+#     try:
+#         # Generate timestamp for unique filenames
+#         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         
-        # Create results JSON
-        results = {
-            "timestamp": datetime.now().isoformat(),
-            "route_stats": {
-                "distance_km": round(route_stats['distance'], 2),
-                "time_minutes": round(route_stats['time'], 2)
-            },
-            "path_segments": []
-        }
+#         # Create results JSON
+#         results = {
+#             "timestamp": datetime.now().isoformat(),
+#             "route_stats": {
+#                 "distance_km": round(route_stats['distance'], 2),
+#                 "time_minutes": round(route_stats['time'], 2)
+#             },
+#             "path_segments": []
+#         }
         
-        # Add path details to results
-        for start, end, edge in optimal_path:
-            # Find start and end node objects
-            start_node = next((node for node in nodes if node.name == start), None)
-            end_node = next((node for node in nodes if node.name == end), None)
+#         # Add path details to results
+#         for start, end, edge in optimal_path:
+#             # Find start and end node objects
+#             start_node = next((node for node in nodes if node.name == start), None)
+#             end_node = next((node for node in nodes if node.name == end), None)
             
-            if start_node and end_node:
-                segment = {
-                    "start": {
-                        "name": start,
-                        "coordinates": [start_node.lat, start_node.lon]
-                    },
-                    "end": {
-                        "name": end,
-                        "coordinates": [end_node.lat, end_node.lon]
-                    },
-                    "distance_km": round(edge.distance, 2),
-                    "congestion_factor": round(edge.congestion_factor, 2)
-                }
-                results["path_segments"].append(segment)
+#             if start_node and end_node:
+#                 segment = {
+#                     "start": {
+#                         "name": start,
+#                         "coordinates": [start_node.lat, start_node.lon]
+#                     },
+#                     "end": {
+#                         "name": end,
+#                         "coordinates": [end_node.lat, end_node.lon]
+#                     },
+#                     "distance_km": round(edge.distance, 2),
+#                     "congestion_factor": round(edge.congestion_factor, 2)
+#                 }
+#                 results["path_segments"].append(segment)
         
-        # Save JSON results
-        with open(f"{timestamp}_{filename}", 'w') as f:
-            json.dump(results, f, indent=2)
+#         # Save JSON results
+#         with open(f"{timestamp}_{filename}", 'w') as f:
+#             json.dump(results, f, indent=2)
         
-        print(f"Results saved locally as {timestamp}_{filename}")
-        return f"{timestamp}_{filename}"
+#         print(f"Results saved locally as {timestamp}_{filename}")
+#         return f"{timestamp}_{filename}"
         
-    except Exception as e:
-        print(f"Error saving results locally: {str(e)}")
-        return None
+#     except Exception as e:
+#         print(f"Error saving results locally: {str(e)}")
+#         return None
+
 def save_results_to_s3(optimal_path, route_stats, nodes):
     """
     Save route optimization results to S3 bucket
@@ -806,7 +807,7 @@ def save_results_to_s3(optimal_path, route_stats, nodes):
         print(f"Error saving to S3: {str(e)}")
         # Fallback to local storage
         print("Falling back to local storage...")
-        return save_results_to_local(optimal_path, route_stats, nodes)
+        # return save_results_to_local(optimal_path, route_stats, nodes)
 
 
 def display_client_results(s3_results, route_stats, optimal_path):
@@ -968,7 +969,7 @@ def main():
     except Exception as e:
         print(f"Error with S3 storage: {e}")
         # Fallback to local storage
-        local_file = save_results_to_local(optimal_path, route_stats, nodes)
+        # local_file = save_results_to_local(optimal_path, route_stats, nodes)
         display_client_results(None, route_stats, optimal_path)
     
     print("\nRoute optimization complete!")
