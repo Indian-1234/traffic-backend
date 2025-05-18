@@ -84,8 +84,15 @@ def run_circuit_on_sv1(circuit):
     """
     print("Running circuit on AWS SV1 quantum simulator...")
     
-    # Initialize the SV1 simulator device
-    device = AwsDevice(SV1_ARN, aws_session=boto3.Session(region_name=AWS_REGION))
+    # Import AwsSession from braket
+    from braket.aws import AwsSession
+    
+    # Create boto3 session with explicit region
+    boto_session = boto3.Session(region_name=AWS_REGION)
+    
+    # Initialize the SV1 simulator device with properly configured AwsSession
+    aws_session = AwsSession(boto_session=boto_session)
+    device = AwsDevice(SV1_ARN, aws_session=aws_session)
     
     # Run the circuit on SV1
     task = device.run(
@@ -105,8 +112,6 @@ def run_circuit_on_sv1(circuit):
     
     print(f"Circuit execution completed. Result: {counts}")
     return counts
-
-
 def predict_traffic_for_node(node, use_aws=True):
     """
     Use the quantum traffic prediction model to predict traffic at a node
