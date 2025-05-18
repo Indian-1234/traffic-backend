@@ -704,7 +704,155 @@ def save_results_to_local(optimal_path, route_stats, nodes, filename="route_resu
     except Exception as e:
         print(f"Error saving results locally: {str(e)}")
         return None
+def save_results_to_s3(optimal_path, route_stats, nodes):
+    """
+    Save route optimization results to S3 bucket
+    
+    Args:
+        optimal_path: The calculated optimal path
+        route_stats: Statistics about the route (distance, time)
+        nodes: List of network nodes
+    """
+    try:
+        # Initialize S3 client
+        s3_client = boto3.client('s3', region_name=AWS_REGION)
+        bucket_name, folder_name = S3_FOLDER
+        
+        # Generate timestamp for unique filenames
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        
+        # Create results JSON
+        results = {
+            "timestamp": datetime.now().isoformat(),
+            "route_stats": {
+                "distance_km": round(route_stats['distance'], 2),
+                "time_minutes": round(route_stats['time'], 2)
+            },
+            "path_segments": []
+        }
+        
+        # Add path details to results
+        for start, end, edge in optimal_path:
+            # Find start and end node objects
+            start_node = next((node for node in nodes if node.name == start), None)
+            end_node = next((node for node in nodes if node.name == end), None)
+            
+            if start_node and end_node:
+                segment = {
+                    "start": {
+                        "name": start,
+                        "coordinates": [start_node.lat, start_node.lon]
+                    },
+                    "end": {
+                        "name": end,
+                        "coordinates": [end_node.lat, end_node.lon]
+                    },
+                    "distance_km": round(edge.distance, 2),
+                    "congestion_factor": round(edge.congestion_factor, 2)
+                }
+                results["path_segments"].append(segment)
+        
+        # Save JSON results to S3
+        json_key = f"{folder_name}/results_{timestamp}.json"
+        json_buffer = io.StringIO()
+        json.dump(results, json_buffer, indent=2)
+        
+        s3_client.put_object(
+            Bucket=bucket_name,
+            Key=json_key,
+            Body=json_buffer.getvalue(),
+            ContentType='application/json'
+        )
+        
+        # Create and save HTML map to S3
+        route_map = visualize_route(nodes, optimal_path)
+        html_key = f"{folder_name}/map_{timestamp}.html"
+        
+        # Save map HTML content
+        map_html = route_map._repr_html_()
+        s3_client.put_object(
+            Bucket=bucket_name,
+            Key=html_key,
+            Body=map_html,
+            ContentType='text/html'
+        )
+        
+        # Generate presigned URLs for client access
+        json_url = s3_client.generate_presigned_url(
+            'get_object',
+            Params={'Bucket': bucket_name, 'Key': json_key},
+            ExpiresIn=3600  # 1 hour
+        )
+        
+        map_url = s3_client.generate_presigned_url(
+            'get_object',
+            Params={'Bucket': bucket_name, 'Key': map_key},
+            ExpiresIn=3600  # 1 hour
+        )
+        
+        print(f"Results uploaded to S3:")
+        print(f"JSON: s3://{bucket_name}/{json_key}")
+        print(f"Map: s3://{bucket_name}/{html_key}")
+        
+        return {
+            "json_path": f"s3://{bucket_name}/{json_key}",
+            "html_path": f"s3://{bucket_name}/{html_key}",
+            "json_url": json_url,
+            "map_url": map_url,
+            "timestamp": timestamp
+        }
+        
+    except Exception as e:
+        print(f"Error saving to S3: {str(e)}")
+        # Fallback to local storage
+        print("Falling back to local storage...")
+        return save_results_to_local(optimal_path, route_stats, nodes)
 
+
+def display_client_results(s3_results, route_stats, optimal_path):
+    """
+    Display results for client with formatted output and links
+    """
+    print("\n" + "="*60)
+    print("QUANTUM ROUTE OPTIMIZATION RESULTS")
+    print("="*60)
+    
+    # Route summary
+    print(f"📍 Route Distance: {route_stats['distance']:.2f} km")
+    print(f"⏱️  Estimated Time: {route_stats['time']:.2f} minutes")
+    print(f"🔗 Number of Segments: {len(optimal_path)}")
+    
+    # Traffic analysis
+    total_congestion = sum(edge.congestion_factor for _, _, edge in optimal_path)
+    avg_congestion = total_congestion / len(optimal_path)
+    
+    if avg_congestion < 0.3:
+        traffic_status = "🟢 Light Traffic"
+    elif avg_congestion < 0.7:
+        traffic_status = "🟡 Moderate Traffic"
+    else:
+        traffic_status = "🔴 Heavy Traffic"
+    
+    print(f"🚦 Overall Traffic: {traffic_status} (Avg: {avg_congestion:.2f})")
+    
+    # Client access information
+    if s3_results and 'json_url' in s3_results:
+        print("\n" + "-"*60)
+        print("CLIENT ACCESS LINKS")
+        print("-"*60)
+        print(f"📊 Route Data (JSON): {s3_results['json_url']}")
+        print(f"🗺️  Interactive Map: {s3_results['map_url']}")
+        print(f"⏰ Valid for: 1 hour")
+        print(f"🏷️  Session ID: {s3_results['timestamp']}")
+    else:
+        print("\n" + "-"*60)
+        print("LOCAL FILES CREATED")
+        print("-"*60)
+        print("📁 Check current directory for:")
+        print("   - route_results.json (route data)")
+        print("   - optimal_route.html (interactive map)")
+    
+    print("\n" + "="*60)
 def main():
     """
     Main function to run the route optimization
@@ -813,8 +961,17 @@ def main():
     visualize_route(nodes, optimal_path)
     
     # Save results to S3 bucket
-    print("\nSaving results to S3...")
-    # s3_results = save_results_to_s3(optimal_path, route_stats, nodes)
+    print("\nSaving results...")
+    try:
+        s3_results = save_results_to_s3(optimal_path, route_stats, nodes)
+        display_client_results(s3_results, route_stats, optimal_path)
+    except Exception as e:
+        print(f"Error with S3 storage: {e}")
+        # Fallback to local storage
+        local_file = save_results_to_local(optimal_path, route_stats, nodes)
+        display_client_results(None, route_stats, optimal_path)
+    
+    print("\nRoute optimization complete!")
     
     # if s3_results:
     #     print("\nResults available at:")
@@ -825,6 +982,19 @@ def main():
     print("\nRoute optimization complete!")
     print("\nRoute optimization complete!")
 
+def check_s3_connectivity():
+    """
+    Check if S3 is accessible with current credentials
+    """
+    try:
+        s3_client = boto3.client('s3', region_name=AWS_REGION)
+        bucket_name, _ = S3_FOLDER
+        # Try to check if bucket exists
+        s3_client.head_bucket(Bucket=bucket_name)
+        return True
+    except Exception as e:
+        print(f"S3 connectivity check failed: {e}")
+        return False
 
 
 if __name__ == "__main__":
