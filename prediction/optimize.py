@@ -786,7 +786,7 @@ def save_results_to_s3(optimal_path, route_stats, nodes):
         
         map_url = s3_client.generate_presigned_url(
             'get_object',
-            Params={'Bucket': bucket_name, 'Key': map_key},
+            Params={'Bucket': bucket_name, 'Key': html_key},
             ExpiresIn=3600  # 1 hour
         )
         
