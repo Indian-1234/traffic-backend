@@ -11,7 +11,8 @@ from datetime import datetime
 from braket.circuits import Circuit
 from braket.devices import LocalSimulator
 from braket.aws import AwsDevice  # Added for AWS Braket
-
+import os
+os.environ['AWS_DEFAULT_REGION'] = 'us-east-1'
 # AWS Braket configuration
 # AWS Braket configuration
 SV1_ARN = "arn:aws:braket:::device/quantum-simulator/amazon/sv1"
@@ -84,34 +85,47 @@ def run_circuit_on_sv1(circuit):
     """
     print("Running circuit on AWS SV1 quantum simulator...")
     
-    # Import AwsSession from braket
-    from braket.aws import AwsSession
+    try:
+        # Method 1: Try with explicit region in environment
+        import os
+        os.environ['AWS_DEFAULT_REGION'] = AWS_REGION
+        
+        # Simple device initialization
+        device = AwsDevice(SV1_ARN)
+        
+    except Exception as e:
+        print(f"Method 1 failed: {e}")
+        try:
+            # Method 2: Try with AwsSession
+            from braket.aws import AwsSession
+            aws_session = AwsSession()
+            device = AwsDevice(SV1_ARN, aws_session=aws_session)
+            
+        except Exception as e2:
+            print(f"Method 2 failed: {e2}")
+            # Method 3: Force region in boto session
+            from braket.aws import AwsSession
+            boto_session = boto3.Session()
+            boto_session.region_name = AWS_REGION  # Force set region
+            aws_session = AwsSession(boto_session=boto_session)
+            device = AwsDevice(SV1_ARN, aws_session=aws_session)
     
-    # Create boto3 session with explicit region
-    boto_session = boto3.Session(region_name=AWS_REGION)
-    
-    # Initialize the SV1 simulator device with properly configured AwsSession
-    aws_session = AwsSession(boto_session=boto_session)
-    device = AwsDevice(SV1_ARN, aws_session=aws_session)
-    
-    # Run the circuit on SV1
+    # Run the circuit
     task = device.run(
         circuit,
         s3_destination_folder=S3_FOLDER,
-        shots=1000  # Number of shots for the quantum simulation
+        shots=1000
     )
     
     print(f"Task ARN: {task.id}")
     print("Waiting for quantum task to complete...")
     
-    # Wait for the task to complete
     result = task.result()
-    
-    # Get the measurement counts
     counts = result.measurement_counts
     
     print(f"Circuit execution completed. Result: {counts}")
     return counts
+
 def predict_traffic_for_node(node, use_aws=True):
     """
     Use the quantum traffic prediction model to predict traffic at a node
