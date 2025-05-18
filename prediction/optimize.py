@@ -704,7 +704,6 @@ def save_results_to_local(optimal_path, route_stats, nodes, filename="route_resu
     except Exception as e:
         print(f"Error saving results locally: {str(e)}")
         return None
-
 def save_results_to_s3(optimal_path, route_stats, nodes):
     """
     Save route optimization results to S3 bucket
